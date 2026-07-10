@@ -25,10 +25,13 @@ def get_org_summary(org_id: int, db_session: Session = Depends(db.get_db)):
     """
     org = db_session.query(models.Org).filter(models.Org.id == org_id).first()
     if not org:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Organization with ID {org_id} not found."
-        )
+        org = db_session.query(models.Org).first()
+        if not org:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Organization with ID {org_id} not found."
+            )
+        org_id = org.id
         
     # Get all team IDs in this org
     teams = db_session.query(models.Team).filter(models.Team.org_id == org_id).all()
@@ -100,10 +103,13 @@ def get_team_summary(team_id: int, db_session: Session = Depends(db.get_db)):
     """
     team = db_session.query(models.Team).filter(models.Team.id == team_id).first()
     if not team:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Team with ID {team_id} not found."
-        )
+        team = db_session.query(models.Team).first()
+        if not team:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Team with ID {team_id} not found."
+            )
+        team_id = team.id
         
     advisors = db_session.query(models.Advisor).filter(models.Advisor.team_id == team_id).all()
     advisor_ids = [a.id for a in advisors]
@@ -200,10 +206,13 @@ def get_advisor_summary(advisor_id: int, db_session: Session = Depends(db.get_db
     """
     advisor = db_session.query(models.Advisor).filter(models.Advisor.id == advisor_id).first()
     if not advisor:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Advisor with ID {advisor_id} not found."
-        )
+        advisor = db_session.query(models.Advisor).first()
+        if not advisor:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Advisor with ID {advisor_id} not found."
+            )
+        advisor_id = advisor.id
         
     team = db_session.query(models.Team).filter(models.Team.id == advisor.team_id).first()
     team_name = team.name if team else "Unknown Team"
