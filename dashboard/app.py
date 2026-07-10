@@ -140,6 +140,16 @@ if role == "👥 Sales Director (Org)":
     st.title("👥 Sales Director Dashboard")
     st.subheader("Organization Performance & Operations")
 
+    # File Uploader for Web Ingestion
+    uploaded_file = st.file_uploader("Upload a new .wav call recording directly from your browser:", type=["wav"])
+    if uploaded_file is not None:
+        if st.button("📤 Stage Uploaded Call File", use_container_width=True):
+            os.makedirs("data/mock_calls", exist_ok=True)
+            target_path = os.path.join("data/mock_calls", uploaded_file.name)
+            with open(target_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            st.success(f"Staged '{uploaded_file.name}' successfully! Now click the 'Scan Ingestion Folder' button below to stage it.")
+
     # Ingestion Actions
     col_act1, col_act2 = st.columns([1, 4])
     with col_act1:
