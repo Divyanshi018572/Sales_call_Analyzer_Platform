@@ -3,7 +3,6 @@ services:
     name: fitnova-api
     env: docker
     dockerfilePath: Dockerfile.api
-    startCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
     plan: free
     envVars:
       - key: DATABASE_URL
@@ -21,7 +20,6 @@ services:
     name: fitnova-dashboard
     env: docker
     dockerfilePath: Dockerfile.dashboard
-    startCommand: streamlit run dashboard/app.py --server.port $PORT --server.address 0.0.0.0
     plan: free
     envVars:
       - key: API_URL
@@ -34,4 +32,3 @@ databases:
   - name: fitnova-db
     plan: free
     databaseName: fitnova_db
-    user: postgres
