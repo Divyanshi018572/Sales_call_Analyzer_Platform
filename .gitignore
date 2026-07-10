@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+
+# Environments
+.env
+.env.local
+
+# Databases
+pgdata/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large Data & Submissions
+data_shard_000_zstd.parquet
+*.zip
+*.mp4
+
+# IDE / Editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
