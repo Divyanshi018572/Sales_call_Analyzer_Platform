@@ -216,14 +216,30 @@ if role == "👥 Sales Director (Org)":
                 options=[c["id"] for c in pending_calls],
                 format_func=lambda cid: f"Call ID: {cid} ({next(c['source_call_id'] for c in pending_calls if c['id'] == cid)})"
             )
-            if st.button("🚀 Process Selected Call", type="primary"):
-                with st.spinner("Executing transcription, scoring, and verifier pipeline..."):
-                    res = api_post(f"/calls/{select_call}/process")
-                    if res:
-                        st.success(f"Call {select_call} processed successfully. Status: {res['status']}")
-                        st.rerun()
-                    else:
-                        st.error(f"Pipeline failed for Call {select_call}.")
+            col_proc1, col_proc2 = st.columns([1, 1])
+            with col_proc1:
+                if st.button("🚀 Process Selected Call", type="primary", use_container_width=True):
+                    with st.spinner("Executing transcription, scoring, and verifier pipeline..."):
+                        res = api_post(f"/calls/{select_call}/process")
+                        if res:
+                            st.success(f"Call {select_call} processed successfully. Status: {res['status']}")
+                            st.rerun()
+                        else:
+                            st.error(f"Pipeline failed for Call {select_call}.")
+            with col_proc2:
+                if st.button("⚡ Process All Pending Calls", use_container_width=True):
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    total_pc = len(pending_calls)
+                    success_count = 0
+                    for idx, c in enumerate(pending_calls):
+                        status_text.text(f"Processing call {idx + 1}/{total_pc}: {c['source_call_id']}...")
+                        res = api_post(f"/calls/{c['id']}/process")
+                        if res:
+                            success_count += 1
+                        progress_bar.progress((idx + 1) / total_pc)
+                    st.success(f"Batch processing completed: {success_count}/{total_pc} calls processed successfully.")
+                    st.rerun()
     else:
         st.info("No calls ingested yet. Click 'Scan Ingestion Folder' to discover calls.")
 

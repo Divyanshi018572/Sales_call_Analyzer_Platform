@@ -30,7 +30,7 @@ def main():
     # Extract the first 5 rows
     count = 0
     for i in range(len(df)):
-        if count >= 5:
+        if count >= 100:
             break
             
         row = df.iloc[i]
