@@ -14,6 +14,62 @@ The prototype is containerized and deployed on Render. You can access the interf
 
 ---
 
+## 🏗️ System Design & Pipeline Architecture
+
+### Pipeline Architecture Diagram
+
+```mermaid
+flowchart TD
+    subgraph Ingestion
+        A[Telephony / CRM / File Source] -->|Audio & Metadata| B[Folder Ingestion Adapter]
+        B -->|Normalized Event| C[(Postgres: calls Table)]
+    end
+
+    subgraph Processing Pipeline [Orchestrator]
+        C -->|status=pending| D[Transcriber & Diariser]
+        D -->|Dual-Channel Split / auto-detect segments| E[Transcription Result]
+        E -->|Raw Transcript| F[Analysis Engine]
+        
+        subgraph Analysis Engine
+            F -->|LLM Prompt Rubric & Taxonomy| G[Gemini 1.5 Flash / Groq Fallback]
+            G -->|JSON Output: Scores & Tags| H[Hallucination Guard: verifier.py]
+            H -->|Verified Quotes| I[Final Evaluated Output]
+        end
+    end
+
+    subgraph Storage
+        I -->|Write transcripts, scores, tags| J[(Postgres DB)]
+        E -->|Write segments & full text| J
+    end
+
+    subgraph Surfacing & Feedback
+        J -->|Queries| K[FastAPI Rollup Endpoints]
+        K -->|JSON Payloads| L[Streamlit Dashboard]
+        
+        L -->|Sales Director View| L1[Org Rollups & Averages]
+        L -->|Team Leader View| L2[Team Analysis & Coach Console]
+        L -->|Advisor View| L3[Individual Call Metrics & Dispute Tags]
+        
+        L3 -->|Dispute Flag| M[Dispute Submission: POST /tags/id/contest]
+        M -->|status=pending| J
+        J -->|Alert Dispute| L2
+        L2 -->|Resolve Dispute: POST /contests/id/resolve| N[Dispute Resolution: Upheld/Overturned]
+        N -->|Update tag status| J
+    end
+```
+
+### Pipeline Stages Walkthrough
+
+1. **Ingestion**: The ingestion adapter normalizes metadata from varying telephony/CRM sources. For the prototype, the `FolderAdapter` monitors a directory for audio files and creates a record in the `calls` table with a `pending` status.
+2. **Transcription & Diarisation**: The call is fetched and processed. It uses `faster-whisper` for multilingual transcription (auto-detecting segment language to handle English-Hindi code-switching). It splits stereo files into two channels (Advisor/Customer) for cheap, deterministic speaker diarisation.
+3. **Analysis & Tagging**: An LLM (`gemini-1.5-flash` with auto-fallback to `llama-3.3-70b` on Groq) analyzes the transcript against the FitNova sales rubric and issue taxonomy. It scores performance and tags compliance violations.
+4. **Verification**: The `verifier.py` component performs literal string matching to verify that any LLM-asserted "quoted compliance violation" actually exists in the raw transcription text. Hallucinated tags are discarded.
+5. **Storage**: The orchestrator updates the database transactionally. It marks the call `done` and saves the transcript, scores, and verified tags.
+6. **Surfacing (Dashboard)**: Streamlit displays three role-tailored views. The Sales Director views org rollups, Team Leaders view team averages, and Advisors view their individual scores.
+7. **Feedback Loop (Contests)**: Advisors can click a button to contest a flag. This creates a contest record. Team Leaders can review the transcript, check the advisor's note, and resolve the contest as either "Upheld" or "Overturned," dynamically adjusting metrics.
+
+---
+
 ## 🏗️ System Architecture Overview
 
 The system runs as three dockerized services:
