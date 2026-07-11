@@ -15,6 +15,8 @@ env/
 
 # Databases
 pgdata/
+*.db
+*.sqlite
 
 # OS
 .DS_Store
@@ -27,6 +29,9 @@ data_shard_000_zstd.parquet
 data/mock_calls/
 *.wav
 *.pdf
+WhatsApp*
+*.mpeg
+*.mpg
 
 # IDE / Editor
 .vscode/
