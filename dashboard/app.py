@@ -146,7 +146,7 @@ if role == "👥 Sales Director (Org)":
     st.subheader("Organization Performance & Operations")
 
     # File Uploader for Web Ingestion
-    uploaded_file = st.file_uploader("Upload a new call recording directly from your browser (.wav, .mp3, .m4a, .ogg, .flac):", type=["wav", "mp3", "m4a", "ogg", "flac"])
+    uploaded_file = st.file_uploader("Upload a new call recording directly from your browser (.wav, .mp3, .m4a, .ogg, .flac, .mpeg, .mpg):", type=["wav", "mp3", "m4a", "ogg", "flac", "mpeg", "mpg"])
     if uploaded_file is not None:
         if st.button("📤 Stage Uploaded Call File", use_container_width=True):
             os.makedirs("data/mock_calls", exist_ok=True)

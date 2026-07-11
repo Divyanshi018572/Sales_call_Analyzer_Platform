@@ -39,7 +39,7 @@ class FolderAdapter(BaseAdapter):
             return events
             
         for filename in os.listdir(self.directory_path):
-            if filename.lower().endswith((".wav", ".mp3", ".m4a", ".ogg", ".flac")):
+            if filename.lower().endswith((".wav", ".mp3", ".m4a", ".ogg", ".flac", ".mpeg", ".mpg")):
                 filepath = os.path.join(self.directory_path, filename)
                 
                 # Deterministic advisor assignment using hash
