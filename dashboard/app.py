@@ -24,8 +24,11 @@ st.set_page_config(
 )
 
 API_URL = os.getenv("API_URL", "http://localhost:8000").strip()
-if API_URL and not API_URL.startswith(("http://", "https://")):
-    API_URL = f"http://{API_URL}"
+if API_URL:
+    if API_URL.startswith("//"):
+        API_URL = f"https:{API_URL}"
+    elif not API_URL.startswith(("http://", "https://")):
+        API_URL = f"https://{API_URL}"
 API_URL = API_URL.rstrip("/")
 
 # Injected custom CSS for premium styling
