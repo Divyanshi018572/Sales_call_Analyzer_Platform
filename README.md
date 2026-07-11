@@ -1,6 +1,16 @@
 # FitNova Sales-Call Intelligence
 
-This repository contains the prototype for the **FitNova Sales-Call Intelligence** system. The system automatically ingests, transcribes, diarises, scores, and audits sales calls for FitNova wellness and fitness coaching programs, featuring an interactive human-in-the-loop feedback loop.
+This repository contains the prototype for the **FitNova Sales-Call Intelligence** system. The system automatically ingests, transcribes, diarises, redacts PII, scores, and audits sales calls for FitNova wellness and fitness coaching programs, featuring an interactive human-in-the-loop feedback loop.
+
+---
+
+## 🌐 Deployed Services (Render)
+
+The prototype is containerized and deployed on Render. You can access the interfaces directly at the links below:
+
+*   **Interactive Web Dashboard**: [https://fitnova-dashboard-8u7r.onrender.com](https://fitnova-dashboard-8u7r.onrender.com)
+*   **FastAPI Backend Base URL**: [https://fitnova-api-os8d.onrender.com](https://fitnova-api-os8d.onrender.com)
+*   **Interactive API Documentation (Swagger)**: [https://fitnova-api-os8d.onrender.com/docs](https://fitnova-api-os8d.onrender.com/docs)
 
 ---
 
@@ -8,7 +18,7 @@ This repository contains the prototype for the **FitNova Sales-Call Intelligence
 
 The system runs as three dockerized services:
 1. **Database (`db`)**: PostgreSQL 15 alpine database storing organizations, teams, advisors, calls, transcripts, scores, compliance tags, and contest records.
-2. **API Backend (`api`)**: FastAPI service running the orchestration pipeline (Ingestion -> Stereo splitting -> Whisper Transcription -> Gemini LLM Scoring -> Hallucination Verifier -> PostgreSQL Storage) and serving rollup metrics.
+2. **API Backend (`api`)**: FastAPI service running the orchestration pipeline (Ingestion -> Stereo splitting -> Whisper Transcription -> PII Redaction -> Gemini LLM Scoring -> Hallucination Verifier -> PostgreSQL Storage) and serving rollup metrics.
 3. **Dashboard (`dashboard`)**: Streamlit application providing custom views for the Sales Director, Team Leaders, and Advisors.
 
 ---
@@ -45,34 +55,36 @@ The system runs as three dockerized services:
 
 ---
 
-## 🚀 One-Click Deployment to Render
-
-This repository includes a [render.yaml](file:///d:/DATA%20SCIENCE/saas%20APPs/fake_call_detect/render.yaml) Blueprint configuration that automatically configures and deploys the PostgreSQL database, the FastAPI backend, and the Streamlit dashboard on Render.
-
-### Steps to Deploy:
-1. Log in to the [Render Dashboard](https://dashboard.render.com).
-2. Click **New** (top right) -> **Blueprint**.
-3. Connect your GitHub repository: `https://github.com/Divyanshi018572/Fitnova-sales-call-analyzer.git`.
-4. Render will automatically read the `render.yaml` blueprint. Enter values for the required environment variables:
-   - `GEMINI_API_KEY` (Your Gemini API key)
-   - `GROQ_API_KEY` (Your Groq API key, optional)
-5. Click **Apply**. Render will spin up the services:
-   - A private database (`fitnova-db`)
-   - The FastAPI web service (`fitnova-api`)
-   - The Streamlit web dashboard (`fitnova-dashboard`)
-6. Once deployment completes, your services will be live at:
-   - **API URL**: `https://fitnova-api.onrender.com` (or your custom Render URL)
-   - **Dashboard URL**: `https://fitnova-dashboard.onrender.com` (or your custom Render URL)
-
----
-
 ## ⚖️ Real vs. Mocked Systems
 
 | Component | Status | Description |
 |---|---|---|
 | Ingestion Source | Mocked | Ingests calls from a local directory (`data/mock_calls/`) rather than live telephony webhooks. |
+| Call Audio Samples | Mocked | Audio is sourced from the public dataset [snorbyte/indic-audio-dialog-sample](https://huggingface.co/datasets/snorbyte/indic-audio-dialog-sample) on Hugging Face to test Hindi-English code-switched speech rather than real FitNova calls. |
 | Transcription / Diarisation | Real | Runs locally using `faster-whisper` and split-channel stereo audio diarisation. |
-| Call Scoring / Tagging | Real | Integrates with Gemini 2.5 Flash API with automated fallback to Groq Llama 3.3. |
+| PII Redaction | Real | Runs locally in the orchestration pipeline using a regex-based pass to mask phone numbers, emails, credit cards, Aadhaar, and PAN numbers before storage or LLM call. |
+| Call Scoring / Tagging | Real | Integrates with Gemini 1.5 Flash API with automated fallback to Groq Llama 3.3. |
 | Database Storage | Real | Persists all call records, transcripts, scores, and tags to a PostgreSQL database. |
 | Organization Rollups | Real | Computes live averages and trends per team and advisor on database records. |
 | Feedback Loop / Contests | Real | Allows advisors to contest tags and team leaders to resolve contests via DB updates. |
+
+---
+
+## 🔒 PII Redaction
+To protect advisor and customer privacy, the orchestration pipeline executes a high-performance regex redaction pass (`redact_text`) *after* transcription but *before* the transcript is stored or sent to the LLM. It successfully masks:
+- **Email addresses** (e.g. `customer@email.com` -> `[EMAIL_REDACTED]`)
+- **Phone numbers** including international/Indian formats with leading `+` signs (e.g. `+91 99999 88888` -> `[PHONE_REDACTED]`)
+- **Credit card numbers** (13 to 16 digits)
+- **Indian Aadhaar card numbers** (12 digits)
+- **Indian PAN card numbers** (e.g. `ABCDE1234F`)
+
+---
+
+## 📝 Case Study Submission Writeup
+
+A comprehensive project writeup detailing Sections A, B, and C is available in the repository at:
+📄 **[Project Writeup](file:///d:/DATA%20SCIENCE/saas%20APPs/fake_call_detect/docs/07-writeup.md)**
+
+*   **Section A: System Architecture & Value Justification**: Overview of pipeline stages, justification of technology choices, and identification of high-value automation targets.
+*   **Section B: Evaluation Rubric & LLM Engineering**: Details on the 5-dimension scoring rubric, automated compliance deductions, LLM fallback configuration (Gemini -> Groq -> Mock), and the verifier hallucination guard.
+*   **Section C: Human-in-the-Loop (HITL) Dispute Resolution**: Explanation of the dispute filing, team leader review, and dynamic score recalculation flow.
