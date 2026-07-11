@@ -26,3 +26,19 @@ This log documents the incremental fixes, improvements, and features added to th
 - Checked out branch `version/v1.1-api-hardening`.
 - All 14 tests in the suite passed successfully.
 - Merged branch `version/v1.1-api-hardening` into `main` and tagged `v1.1-api-hardening`.
+
+## 2026-07-11 - v1.2 - Authentication & Authorization
+
+### Changes
+- **Database Schema Migration**: Added versioned SQL migration `migrations/0001_add_users_table.sql` and rollback files to create the `users` table with roles (advisor, team leader, director).
+- **ORM Model**: Registered `User` model in `src/storage/models.py`.
+- **JWT & Password Hashing**: Implemented token generation, refresh tokens, and direct bcrypt-based password hashing in `src/api/auth_utils.py`.
+- **Auth Routes**: Added `POST /auth/login`, `GET /auth/me`, and `POST /auth/refresh` endpoints in `src/api/routers/auth.py`.
+- **Row-Level & Role Scoping**: Updated routing layers (`calls.py`, `summaries.py`, `contests.py`) to restrict advisor and team leader scopes to their row-level records in the query layer.
+- **Seeding**: Added `scripts/seed_users.py` to populate default user accounts.
+- **Testing**: Added `tests/test_auth.py` asserting login failures, JWT credentials, and multi-tier row-level protection. Updated `tests/test_api.py` client fixture to use auto-authenticated director credentials.
+
+### Verification
+- Checked out branch `version/v1.2-authentication-authorization`.
+- Seeding and all 17 tests passed successfully.
+- Merged branch `version/v1.2-authentication-authorization` into `main` and tagged `v1.2-authentication-authorization`.
