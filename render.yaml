@@ -26,7 +26,7 @@ services:
         fromService:
           type: web
           name: fitnova-api
-          property: host
+          property: hostport
 
 databases:
   - name: fitnova-db

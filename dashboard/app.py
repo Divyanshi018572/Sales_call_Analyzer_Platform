@@ -23,9 +23,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-API_URL = os.getenv("API_URL", "http://localhost:8000")
+API_URL = os.getenv("API_URL", "http://localhost:8000").strip()
 if API_URL and not API_URL.startswith(("http://", "https://")):
     API_URL = f"http://{API_URL}"
+API_URL = API_URL.rstrip("/")
 
 # Injected custom CSS for premium styling
 st.markdown("""
