@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     
     # CORS Configuration
     ALLOWED_ORIGINS: str = "http://localhost:5173"
+    
+    # JWT authentication settings
+    JWT_SECRET_KEY: str = "placeholder_secret_key_change_me_in_production"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ALGORITHM: str = "HS256"
 
 # Create a singleton settings object
 settings = Settings()

@@ -13,13 +13,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from src.storage import db, models
-from src.api import schemas
+from src.api import schemas, auth_utils
 from typing import Dict
 
 router = APIRouter(tags=["Summaries"])
 
 @router.get("/orgs/{org_id}/summary", response_model=schemas.OrgSummaryResponse)
-def get_org_summary(org_id: int, db_session: Session = Depends(db.get_db)):
+def get_org_summary(
+    org_id: int, 
+    db_session: Session = Depends(db.get_db),
+    current_user: models.User = Depends(auth_utils.RoleChecker(["director"]))
+):
     """
     Computes organization-wide averages and aggregates compliance tag counts (Sales Director view).
     """
@@ -97,10 +101,20 @@ def get_org_summary(org_id: int, db_session: Session = Depends(db.get_db)):
     )
 
 @router.get("/teams/{team_id}/summary", response_model=schemas.TeamSummaryResponse)
-def get_team_summary(team_id: int, db_session: Session = Depends(db.get_db)):
+def get_team_summary(
+    team_id: int, 
+    db_session: Session = Depends(db.get_db),
+    current_user: models.User = Depends(auth_utils.RoleChecker(["team_leader", "director"]))
+):
     """
     Computes team rollups, pending tag disputes count, and individual advisor lists (Team Leader view).
     """
+    if current_user.role == "team_leader" and team_id != current_user.team_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this team's summary"
+        )
+        
     team = db_session.query(models.Team).filter(models.Team.id == team_id).first()
     if not team:
         team = db_session.query(models.Team).first()
@@ -200,10 +214,28 @@ def get_team_summary(team_id: int, db_session: Session = Depends(db.get_db)):
     )
 
 @router.get("/advisors/{advisor_id}/summary", response_model=schemas.AdvisorSummaryResponse)
-def get_advisor_summary(advisor_id: int, db_session: Session = Depends(db.get_db)):
+def get_advisor_summary(
+    advisor_id: int, 
+    db_session: Session = Depends(db.get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user)
+):
     """
     Computes individual advisor quality dimensions, overall average, and recent call list (Advisor view).
     """
+    # Enforce row-level authentication for advisors and team leaders
+    if current_user.role == "advisor" and advisor_id != current_user.advisor_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this advisor's summary"
+        )
+    elif current_user.role == "team_leader":
+        advisor = db_session.query(models.Advisor).filter(models.Advisor.id == advisor_id).first()
+        if not advisor or advisor.team_id != current_user.team_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to this advisor's summary"
+            )
+            
     advisor = db_session.query(models.Advisor).filter(models.Advisor.id == advisor_id).first()
     if not advisor:
         advisor = db_session.query(models.Advisor).first()
