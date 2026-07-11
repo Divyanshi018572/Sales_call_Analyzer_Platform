@@ -151,3 +151,34 @@ class ContestResponse(BaseModel):
     resolved_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+class LoginRequest(BaseModel):
+    """
+    Request model for authentication login.
+    """
+    email: str
+    password: str
+
+class TokenResponse(BaseModel):
+    """
+    Response model containing access and refresh tokens along with user metadata.
+    """
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    role: str
+    email: str
+    advisor_id: Optional[int] = None
+    team_id: Optional[int] = None
+
+class UserProfileResponse(BaseModel):
+    """
+    Response model for the authenticated user's profile.
+    """
+    id: int
+    email: str
+    role: str
+    advisor_id: Optional[int] = None
+    team_id: Optional[int] = None
+
+    model_config = {"from_attributes": True}

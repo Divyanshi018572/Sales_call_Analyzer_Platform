@@ -14,6 +14,7 @@ from src.api.main import app
 from src.storage.db import SessionLocal, engine, Base
 from src.storage import models, crud
 from src.ingestion.schemas import CallEvent
+from src.api import auth_utils
 
 client = TestClient(app)
 
@@ -38,10 +39,28 @@ def db_session():
         session.add(advisor)
         session.flush()
         
+        # Seed Director User for the tests to authenticate
+        hashed_pwd = auth_utils.hash_password("director_pass")
+        user = models.User(
+            email="director@test.com",
+            hashed_password=hashed_pwd,
+            role="director"
+        )
+        session.add(user)
+        session.flush()
+        
         session.commit()
+        
+        # Generate token and inject into client headers
+        token = auth_utils.create_access_token(data={"sub": "director@test.com"})
+        client.headers.update({"Authorization": f"Bearer {token}"})
+        
         yield session, org.id, team.id, advisor.id
     finally:
+        # Clear headers after tests
+        client.headers.pop("Authorization", None)
         # Clean up database in reverse dependency order
+        session.query(models.User).delete()
         session.query(models.Contest).delete()
         session.query(models.Tag).delete()
         session.query(models.Scores).delete()

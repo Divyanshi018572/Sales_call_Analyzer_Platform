@@ -14,13 +14,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from src.storage import db, models
-from src.api import schemas
+from src.api import schemas, auth_utils
 from src.analysis.rubric import calculate_overall_score
 
 router = APIRouter(tags=["Contests"])
 
 @router.post("/tags/{tag_id}/contest", response_model=schemas.ContestResponse, status_code=status.HTTP_201_CREATED)
-def contest_tag(tag_id: int, request: schemas.ContestRequest, db_session: Session = Depends(db.get_db)):
+def contest_tag(
+    tag_id: int, 
+    request: schemas.ContestRequest, 
+    db_session: Session = Depends(db.get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user)
+):
     """
     Submits a dispute for a specific compliance tag, setting its contest status to 'pending'.
     """
@@ -29,6 +34,13 @@ def contest_tag(tag_id: int, request: schemas.ContestRequest, db_session: Sessio
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Compliance tag with ID {tag_id} not found."
+        )
+        
+    # Enforce row-level authorization for advisors
+    if current_user.role == "advisor" and tag.call.advisor_id != current_user.advisor_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to contest this compliance tag."
         )
         
     if tag.contest_status != "none":
@@ -52,7 +64,12 @@ def contest_tag(tag_id: int, request: schemas.ContestRequest, db_session: Sessio
     return contest
 
 @router.post("/contests/{contest_id}/resolve", response_model=schemas.ContestResponse)
-def resolve_contest(contest_id: int, request: schemas.ContestResolveRequest, db_session: Session = Depends(db.get_db)):
+def resolve_contest(
+    contest_id: int, 
+    request: schemas.ContestResolveRequest, 
+    db_session: Session = Depends(db.get_db),
+    current_user: models.User = Depends(auth_utils.RoleChecker(["team_leader", "director"]))
+):
     """
     Resolves a dispute as 'upheld' or 'overturned', automatically recalculating scores if a critical tag is overturned.
     """
@@ -117,12 +134,18 @@ def resolve_contest(contest_id: int, request: schemas.ContestResolveRequest, db_
     return contest
 
 @router.get("/contests/pending", response_model=list[dict])
-def get_pending_contests(db_session: Session = Depends(db.get_db)):
+def get_pending_contests(
+    db_session: Session = Depends(db.get_db),
+    current_user: models.User = Depends(auth_utils.RoleChecker(["team_leader", "director"]))
+):
     """
-    Retrieves all disputes that are pending resolution, along with context (advisor name, tag description).
+    Retrieves all disputes that are pending resolution, filterable by team scope for Team Leaders.
     """
-    from typing import List as PyList
-    contests = db_session.query(models.Contest).join(models.Tag).filter(models.Tag.contest_status == "pending").all()
+    query = db_session.query(models.Contest).join(models.Tag).filter(models.Tag.contest_status == "pending")
+    if current_user.role == "team_leader":
+        query = query.join(models.Call).join(models.Advisor).filter(models.Advisor.team_id == current_user.team_id)
+        
+    contests = query.all()
     results = []
     for c in contests:
         tag = c.tag

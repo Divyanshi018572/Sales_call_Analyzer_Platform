@@ -110,7 +110,7 @@ Run the full existing test suite — everything that passed before must still pa
 **Why before frontend:** building React screens against an unauthenticated API means rebuilding
 routing logic later. Get auth into the API first; React just consumes it.
 
-- [ ] **Migration strategy for the new `users` table** (this repo has no Alembic set up yet;
+- [x] **Migration strategy for the new `users` table** (this repo has no Alembic set up yet;
       don't silently `Base.metadata.create_all()` against a live database with real data):
   - Write a plain, versioned SQL migration file: `migrations/0001_add_users_table.sql`, with a
     matching `migrations/0001_add_users_table_rollback.sql`.
@@ -118,23 +118,23 @@ routing logic later. Get auth into the API first; React just consumes it.
     `psql $DATABASE_URL -f migrations/0001_add_users_table.sql`).
   - This is intentionally lightweight — not introducing Alembic for one table — but it must be
     scripted and documented, not applied ad-hoc from a Python shell.
-- [ ] New table: `users` (id, email, hashed_password, role, advisor_id FK nullable, team_id FK
+- [x] New table: `users` (id, email, hashed_password, role, advisor_id FK nullable, team_id FK
       nullable).
   - Role enum: `advisor`, `team_leader`, `director`.
   - `advisor` role links to one `advisors.id`; `team_leader` links to one `teams.id`; `director`
     has no FK (org-wide).
-- [ ] `JWT_SECRET_KEY` added to `.env.example` and `config.py` (`Settings` class) — never
+- [x] `JWT_SECRET_KEY` added to `.env.example` and `config.py` (`Settings` class) — never
       hardcoded, never committed with a real value.
-- [ ] `POST /auth/login` → JWT access token (short-lived) + refresh token.
-- [ ] JWT handling via `python-jose` + custom middleware (not `fastapi-users`) — more lines of
+- [x] `POST /auth/login` → JWT access token (short-lived) + refresh token.
+- [x] JWT handling via `python-jose` + custom middleware (not `fastapi-users`) — more lines of
       code, but every layer is understandable and debuggable, which matters more here than
       saving boilerplate.
-- [ ] Dependency-injected `get_current_user()` in FastAPI, scoped decorators:
+- [x] Dependency-injected `get_current_user()` in FastAPI, scoped decorators:
   - `require_role("director")` → org-wide endpoints.
   - `require_role("team_leader", "director")` → team-scoped endpoints.
   - Row-level filtering: an advisor can only ever query their own `advisor_id`, enforced in the
     query layer, not just hidden in the UI.
-- [ ] Seed script: create one dummy user per role for demo purposes (`seed_users.py`).
+- [x] Seed script: create one dummy user per role for demo purposes (`seed_users.py`).
 
 **Checkpoint:** `curl` test — advisor token hitting another advisor's calls returns 403. Director
 token hitting anything returns 200. Document this test in `docs/auth_test.md`.

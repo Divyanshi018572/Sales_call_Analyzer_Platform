@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from src.storage.db import engine, Base
 from src.storage import models  # Ensure SQLAlchemy models are registered
-from src.api.routers import calls, summaries, contests
+from src.api.routers import calls, summaries, contests, auth
 from src.config import settings
 
 # Create all database tables on start (safe/idempotent)
@@ -82,6 +82,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 app.include_router(calls.router)
 app.include_router(summaries.router)
 app.include_router(contests.router)
+app.include_router(auth.router)
 
 @app.get("/")
 def read_root():

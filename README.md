@@ -123,6 +123,7 @@ The system runs as three dockerized services:
 | Database Storage | Real | Persists all call records, transcripts, scores, and tags to a PostgreSQL database. |
 | Organization Rollups | Real | Computes live averages and trends per team and advisor on database records. |
 | Feedback Loop / Contests | Real | Allows advisors to contest tags and team leaders to resolve contests via DB updates. |
+| User Authentication / Authorization | Real | JWT role-based access control with row-level scoping for advisors, team leaders, and directors. |
 
 ---
 

@@ -138,3 +138,17 @@ class Contest(Base):
     
     # Relationships
     tag = relationship("Tag", back_populates="contest")
+
+class User(Base):
+    """
+    Represents a User account in the platform with JWT auth and role scoping.
+    """
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    hashed_password = Column(String, nullable=False)
+    role = Column(String, nullable=False) # 'advisor', 'team_leader', 'director'
+    advisor_id = Column(Integer, ForeignKey("advisors.id", ondelete="SET NULL"), nullable=True)
+    team_id = Column(Integer, ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
