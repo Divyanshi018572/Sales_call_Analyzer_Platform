@@ -1,316 +1,243 @@
-# FitNova Sales-Call Intelligence — Build Plan
+# FitNova Full-Stack Platform — Build Plan
 
-Source spec: `AI_ENGINEER_INTERN_SKILLOVILLa.pdf` (48h nominal window, working with a ~31h budget —
-containerization and a deployed link are treated as mandatory, not optional, which adds ~1h over
-the original 30h estimate). This file is the single source of truth for scope, stack, and
-sequencing. Re-read it (and the original PDF) after finishing every component, before starting the
-next one.
+This repo is an extended, production-readiness version of
+[Fitnova-sales-call-analyzer](https://github.com/Divyanshi018572/Fitnova-sales-call-analyzer),
+built **after** that repo's take-home assignment was submitted, in a fully separate repo so the
+original submission is never at risk of being touched or broken.
+
+**Goal:** evolve the backend-heavy prototype (FastAPI + Postgres + Streamlit) into a true
+full-stack application (FastAPI + Postgres + Redis/Celery + React frontend + real auth), without
+breaking anything that already works.
+
+**Approach:** versioned rollout. Each version is independently runnable and checkpoint-verified
+before moving to the next. The old Streamlit dashboard stays alive and functional until the React
+frontend reaches parity, so there is always a working demo.
+
+This file is the single source of truth for scope and sequencing, same convention as the original
+repo's `PLAN.md`. Re-read it after finishing every version, before starting the next one.
 
 ---
 
-## 1. Tech stack — decided, with reasons
+## 0. Baseline (v1.0 — already built, carried over from the original repo)
 
-| Layer | Choice | Why this, not the alternative |
+- FastAPI backend, 9 REST endpoints (10 in practice — `GET /contests/pending` was added late in
+  the original repo; carry it over as-is, documented, not a bug)
+- Postgres: Org → Team → Advisor → Call hierarchy, idempotent via `(source_system, source_call_id)`
+- Synchronous pipeline: `orchestrator.process_call()` — transcribe → diarise → analyze → store
+- Streamlit dashboard: role-tailored views via dropdown (no real auth)
+- Docker Compose: `db`, `api`, `dashboard` services
+- Deployed on Render
+
+---
+
+## 1. Repo setup (do this before anything else)
+
+This repo is created by cloning the original with full history preserved, then re-pointing the
+remote — not by copy-pasting files. This keeps the commit history and milestone tags intact.
+
+```bash
+git clone https://github.com/Divyanshi018572/Fitnova-sales-call-analyzer.git fitnova-fullstack-platform
+cd fitnova-fullstack-platform
+git remote remove origin
+git remote add origin <new-repo-url>
+git remote -v   # confirm both fetch and push point to the NEW repo before doing anything else
+git push -u origin main
+git push origin --tags
+```
+
+Add one line at the top of this repo's `README.md`:
+> This is an extended version of
+> [Fitnova-sales-call-analyzer](https://github.com/Divyanshi018572/Fitnova-sales-call-analyzer),
+> built beyond the original take-home assignment scope to demonstrate production-readiness
+> (auth, async processing, a React frontend).
+
+---
+
+## 2. Target architecture (v3.0)
+
+```mermaid
+flowchart TB
+    subgraph Client
+        FE[React Frontend<br/>role-based routes]
+    end
+
+    subgraph Backend
+        API[FastAPI<br/>REST + Auth + CORS]
+        WORKER[Celery Worker<br/>async call processing]
+        REDIS[(Redis<br/>queue + cache)]
+    end
+
+    subgraph Data
+        PG[(Postgres<br/>org/team/advisor/call/users)]
+    end
+
+    FE -->|JWT auth, CORS-allowed origin| API
+    API -->|enqueue job| REDIS
+    REDIS --> WORKER
+    WORKER -->|transcribe/diarise/analyze| WORKER
+    WORKER -->|write results| PG
+    API -->|read/write| PG
+    FE -->|poll or WS status| API
+```
+
+---
+
+## 3. Version roadmap
+
+### v1.1 — API hardening (foundation, no visible change)
+**Why first:** auth and async both depend on the API being clean. Retrofitting pagination,
+error schemas, and CORS around a live frontend is more painful than doing it now.
+
+- [x] Add Pydantic response models for every endpoint (no raw dict/ORM returns).
+- [x] Add pagination to `GET /calls` (`limit`, `offset`).
+- [x] Add filtering (`?team_id=`, `?advisor_id=`, `?status=`) to `GET /calls`.
+- [x] Standardize error responses via FastAPI exception handlers:
+      `{"error": {"code": ..., "message": ...}}`.
+- [x] **Add CORS middleware** (`fastapi.middleware.cors.CORSMiddleware`), allowed origins read
+      from an env var (`ALLOWED_ORIGINS`), not hardcoded — defaults to `http://localhost:5173`
+      (Vite's dev port) locally, set to the real frontend URL in Render. This was missing from
+      the first draft of this plan and would have silently blocked every browser request from
+      the React app in v2.0 if left until then.
+- [x] Add a `/health` endpoint (needed later for Docker healthchecks on new services).
+
+**Checkpoint:** existing Streamlit dashboard still works unmodified against the hardened API.
+Full `docker-compose up --build`, click through all 3 dashboard views, confirm no regressions.
+Run the full existing test suite — everything that passed before must still pass.
+
+---
+
+### v1.2 — Authentication & authorization
+**Why before frontend:** building React screens against an unauthenticated API means rebuilding
+routing logic later. Get auth into the API first; React just consumes it.
+
+- [ ] **Migration strategy for the new `users` table** (this repo has no Alembic set up yet;
+      don't silently `Base.metadata.create_all()` against a live database with real data):
+  - Write a plain, versioned SQL migration file: `migrations/0001_add_users_table.sql`, with a
+    matching `migrations/0001_add_users_table_rollback.sql`.
+  - Apply it manually and document the exact command in `docs/migrations.md` (e.g.
+    `psql $DATABASE_URL -f migrations/0001_add_users_table.sql`).
+  - This is intentionally lightweight — not introducing Alembic for one table — but it must be
+    scripted and documented, not applied ad-hoc from a Python shell.
+- [ ] New table: `users` (id, email, hashed_password, role, advisor_id FK nullable, team_id FK
+      nullable).
+  - Role enum: `advisor`, `team_leader`, `director`.
+  - `advisor` role links to one `advisors.id`; `team_leader` links to one `teams.id`; `director`
+    has no FK (org-wide).
+- [ ] `JWT_SECRET_KEY` added to `.env.example` and `config.py` (`Settings` class) — never
+      hardcoded, never committed with a real value.
+- [ ] `POST /auth/login` → JWT access token (short-lived) + refresh token.
+- [ ] JWT handling via `python-jose` + custom middleware (not `fastapi-users`) — more lines of
+      code, but every layer is understandable and debuggable, which matters more here than
+      saving boilerplate.
+- [ ] Dependency-injected `get_current_user()` in FastAPI, scoped decorators:
+  - `require_role("director")` → org-wide endpoints.
+  - `require_role("team_leader", "director")` → team-scoped endpoints.
+  - Row-level filtering: an advisor can only ever query their own `advisor_id`, enforced in the
+    query layer, not just hidden in the UI.
+- [ ] Seed script: create one dummy user per role for demo purposes (`seed_users.py`).
+
+**Checkpoint:** `curl` test — advisor token hitting another advisor's calls returns 403. Director
+token hitting anything returns 200. Document this test in `docs/auth_test.md`.
+
+---
+
+### v2.0 — React frontend (replaces Streamlit as primary UI)
+**Why this scope, not more:** match the existing Streamlit feature set first — don't add new
+features while also changing the whole stack. Feature parity, then polish.
+
+- [ ] `frontend/` — Vite + React (lighter than Next.js; no SSR needed for an internal dashboard).
+- [ ] Routing: `react-router` — `/login`, `/director`, `/team/:teamId`, `/advisor/:advisorId`.
+- [ ] Auth flow: login form → store JWT (memory + httpOnly refresh cookie, not localStorage) →
+      attach to API requests.
+- [ ] Pages to rebuild from Streamlit, easiest → hardest:
+  1. Advisor view (own calls + scores)
+  2. Team Leader view (team roster + per-advisor rollups)
+  3. Director view (org health, cross-team comparison)
+- [ ] Charting: `recharts` for score trends, tag frequency.
+- [ ] New Docker service: `frontend` (Vite build → served via nginx or `serve`).
+- [ ] Update `docker-compose.yml`: add `frontend` service, keep `dashboard` (Streamlit) running
+      in parallel on a different port until parity is confirmed.
+
+**Checkpoint:** side-by-side comparison — every number/chart the Streamlit dashboard shows, the
+React app shows the same value for the same advisor/team. Only then remove Streamlit.
+
+---
+
+### v2.1 — Remove Streamlit, finalize frontend
+- [ ] Delete the `dashboard` service from `docker-compose.yml` once the v2.0 checkpoint passes.
+- [ ] Update the README architecture diagram to reflect React as the only frontend.
+- [ ] Update the "Real vs Mocked" table: Auth row changes from "Mocked" to "Real — JWT,
+      role-scoped."
+
+---
+
+### v2.2 — Async processing (Celery + Redis)
+**Why after frontend, not before:** async processing changes the API contract
+(`POST /calls/{id}/process` returns `202` + job id instead of blocking until done). Better to
+design the frontend against this contract once, rather than retrofit polling logic into
+already-built pages.
+
+**This version breaks existing tests — plan for it explicitly, don't discover it mid-refactor:**
+- [ ] Before touching `orchestrator.py`, list every existing test that asserts on
+      `POST /calls/{id}/process`'s response (`test_pipeline_e2e.py`, `test_api.py` from the
+      original repo). Update their assertions to expect `202` + `{"job_id": ...}` in the same
+      commit that changes the endpoint — never leave them red between commits.
+  - Add a **new** test that polls `/calls/{id}/status` until `done`/`failed`, then asserts on the
+    final stored result the same way the old synchronous test did. This replaces the old
+    "process and immediately assert" pattern.
+- [ ] Add a `redis` service to `docker-compose.yml`.
+- [ ] `celery_app.py` — Celery app instance, Redis as broker + result backend.
+- [ ] Move `orchestrator.process_call()`'s body into a Celery task (`tasks.py`); orchestrator
+      becomes a thin wrapper that either calls the task directly (sync/dev mode, no Redis
+      required) or `.delay()`s it (async/prod mode) — keep both paths so local testing doesn't
+      require Redis running.
+- [ ] `POST /calls/{id}/process` → enqueue, return `{"job_id": ..., "status": "queued"}`.
+- [ ] `GET /calls/{id}/status` → poll endpoint reading Celery task state.
+- [ ] New Docker service: `worker` (runs `celery -A celery_app worker`).
+- [ ] Frontend: replace the "processing..." spinner with actual polling (every 2s) against
+      `/calls/{id}/status`.
+
+**Checkpoint:** submit 5 calls at once, confirm they process concurrently (not serially), confirm
+idempotency still holds if the same call is queued twice. Full test suite green, including the
+updated and new tests above.
+
+---
+
+## 4. Tech stack summary
+
+| Layer | Choice | Why |
 |---|---|---|
-| Language | Python 3.11 | One language end to end (pipeline + API + dashboard) = less context-switching in 30h. |
-| Transcription | `faster-whisper` (medium model, local) | Free, offline, handles Hindi-English code-switching decently. No per-minute API cost/rate-limit risk during a demo. |
-| Diarisation | Dual-channel split first; `pyannote.audio` only if forced to handle mono | Channel-separated audio is deterministic and cheap. Blind diarisation is a real ML problem — don't burn hours tuning it; treat mono as an edge case with a documented fallback (see §5). |
-| LLM (scoring/tagging) | **Google Gemini API** (`gemini-2.5-flash`), free tier — **fallback: Groq** (`llama-3.3-70b-versatile`), also free | Gemini free tier is the most generous + highest-quality free option available, supports structured/JSON output needed for reliable tagging. Groq is the fallback if Gemini's daily quota is hit or the call fails — wrap both behind a single `analyze_call()` function so the rest of the pipeline never knows which provider actually answered. |
-| Database | PostgreSQL via `docker-compose`, `SQLAlchemy` ORM | Relational fits the org→team→advisor→call hierarchy and rollup aggregation queries. One `docker-compose up` = zero manual setup for the evaluator. |
-| Backend API | FastAPI | Async-friendly, auto-generates OpenAPI docs (useful when they say "we may ask you to explain any part"), typed request/response models via Pydantic catch bugs early. |
-| Frontend/dashboard | Streamlit | Pure Python, no separate frontend build step — fastest path to the 3 required views (org/team/advisor) inside a 30h budget. *(Stretch, only if time remains after core loop works: restyle with Next.js — do not attempt this before the core pipeline is proven end to end.)* |
-| Orchestration | Plain Python function chain, called synchronously per call | Celery/queues add real value at scale but are not needed to prove the design in a prototype — mention them in the writeup as the production upgrade path instead of building them. |
-| Testing | `pytest` | Standard, fast, works for both unit tests (per module) and one end-to-end pipeline test. |
-| Containerization | Docker, multi-stage builds, `docker-compose` for local orchestration | Every service (DB, API, dashboard) runs identically on any machine — no "works on my machine" risk for the evaluator. Multi-stage keeps images small (builder stage installs deps, runtime stage copies only what's needed). |
-| Deployment | Render (Web Services for API + dashboard, Managed Postgres) | Deploys directly from a Dockerfile with no extra config, free managed Postgres in the same project, gives a public URL per service — satisfies the assignment's "one clear command **or a deployed link**" directly. Considered Railway (similar, tighter free-tier caps) and AWS/GCP (too much setup overhead for this scope). |
-
-**Decision rule for anything not listed above:** pick the option that gets one real call through
-the full loop fastest, and write the trade-off down in the writeup. Do not swap a choice above
-mid-build unless a component is provably blocking you for >1 hour.
+| Frontend | React + Vite | Lighter than Next.js, no SSR needed for an internal dashboard |
+| Auth | FastAPI + `python-jose` (custom JWT) | Every layer understandable and debuggable over a black-box library |
+| CORS | `fastapi.middleware.cors.CORSMiddleware`, env-driven allowed origins | Required the moment the frontend and API are on different origins — added in v1.1, not retrofitted later |
+| Queue | Celery + Redis | Industry-standard, well-documented, Render has a managed Redis add-on |
+| Charts | Recharts | Pairs well with a Vite/React stack, minimal setup |
+| DB migrations | Plain versioned SQL files (`migrations/000X_*.sql` + rollback) | One new table doesn't justify introducing Alembic; still needs to be scripted and documented, not ad-hoc |
+| Deployment | Render, 5 services (db, redis, api, worker, frontend) | Same platform as the original repo, just more services |
 
 ---
 
-## 2. Repository structure (modular, one responsibility per file)
+## 5. What stays exactly the same (do not touch)
 
-```
-fitnova-call-intelligence/
-├── AGENTS.md
-├── README.md
-├── PLAN.md
-├── docker-compose.yml            # 3 services: db, api, dashboard — `docker-compose up` runs everything
-├── Dockerfile.api                # builds the FastAPI service image
-├── Dockerfile.dashboard          # builds the Streamlit dashboard image
-├── .dockerignore
-├── render.yaml                   # Render Blueprint: db + api + dashboard services, one-step deploy
-├── requirements.txt
-├── .env.example
-├── .gitignore
-├── data/
-│   └── mock_calls/              # sample audio + a few pre-written transcripts (edge cases)
-├── docs/
-│   ├── 01-ingestion.md
-│   ├── 02-transcription.md
-│   ├── 03-analysis-engine.md
-│   ├── 04-storage.md
-│   ├── 05-pipeline.md
-│   ├── 06-api.md
-│   ├── 07-dashboard.md
-│   └── 08-feedback-loop.md      # one file per component, written when that component merges
-├── src/
-│   ├── config.py                # env vars, constants — nothing else
-│   ├── ingestion/
-│   │   ├── base_adapter.py      # abstract interface: fetch_new_calls(), normalize()
-│   │   ├── folder_adapter.py    # concrete: mock "telephony" source = a folder
-│   │   └── schemas.py           # normalized call-event shape
-│   ├── transcription/
-│   │   ├── transcriber.py       # faster-whisper wrapper only
-│   │   └── diarizer.py          # channel-split / pyannote fallback only
-│   ├── analysis/
-│   │   ├── prompts.py           # the rubric + tag-taxonomy prompt text, nothing else
-│   │   ├── rubric.py            # dimension weights, roll-up math
-│   │   ├── llm_client.py        # provider-agnostic wrapper: try Gemini, fall back to Groq
-│   │   ├── tagger.py            # calls llm_client, gets structured JSON back
-│   │   └── verifier.py          # hallucination guard: quoted_line must exist in transcript
-│   ├── storage/
-│   │   ├── db.py                 # engine/session setup only
-│   │   ├── models.py             # SQLAlchemy tables (see PLAN §4)
-│   │   └── crud.py               # get/create functions, nothing else
-│   ├── pipeline/
-│   │   └── orchestrator.py       # process_call(call_id): ingest→transcribe→analyze→store,
-│   │                              # idempotent (checks call.status before reprocessing)
-│   └── api/
-│       ├── main.py               # FastAPI app + router registration only
-│       ├── schemas.py            # Pydantic request/response models
-│       └── routers/
-│           ├── calls.py
-│           ├── summaries.py      # org/team/advisor rollups
-│           └── contests.py       # feedback loop endpoints
-├── dashboard/
-│   └── app.py                    # Streamlit, reads from API or DB directly
-├── tests/
-│   ├── test_ingestion.py
-│   ├── test_analysis_verifier.py # hallucination-guard test — evaluator will care about this one
-│   ├── test_storage.py
-│   └── test_pipeline_e2e.py      # the test that proves "one call, full loop"
-└── scripts/
-    └── run_demo.sh               # the ONE command the README promises
-```
-
-**Rule:** if a file is doing two jobs (e.g. fetching *and* transforming data), split it. Every file
-should be explainable in one sentence — if it needs "and", split it.
+- `orchestrator.py` core logic (transcribe → analyze → store) — only wrapped in a Celery task in
+  v2.2, not rewritten.
+- `verifier.py`, `diarizer.py`, `transcriber.py`, `llm_client.py`, `rubric.py` — untouched,
+  already solid and tested.
+- Postgres schema for existing tables — only additive changes (`users` table via a documented
+  migration), no altering or dropping existing tables/columns.
+- Existing REST endpoints — extended (pagination, auth, and in v2.2 the process-endpoint
+  contract), not silently replaced without updating both the tests and this document first.
 
 ---
 
-## 2a. Test/mock audio source — `data/mock_calls/`
+## 6. Sequencing note (not a deadline)
 
-FitNova has no real call recordings to hand over, so `data/mock_calls/` is seeded with real
-Hindi-English conversational audio pulled from a public dataset, purely to prove the
-transcription/diarisation pipeline against genuine code-switched speech rather than synthetic or
-silent test files.
+The version order — v1.1 → v1.2 → v2.0 → v2.1 → v2.2 → (optional v3.0) — is fixed; do not
+reorder it, the dependencies between versions are real (auth before frontend, frontend before
+async). Hour/day estimates are deliberately not included here: they were a source of
+false-precision guesswork in the original repo's planning and aren't repeated here. Track actual
+time per version in `BUILD_LOG.md` instead, and let that — not a guess made before writing any
+code — inform how much time the remaining versions realistically need.
 
-- **Source:** `snorbyte/indic-audio-dialog-sample` (Hugging Face). Chosen over other candidates
-  (`CallCenterEN` — transcripts only, no audio; `AxonData` sets — English-only, license unclear;
-  `SwitchLingua` — requires a signed licensing agreement) because it ships actual multi-channel
-  `.wav` audio, includes Hindi, and is designed for code-switching analysis with no license
-  friction for this kind of non-commercial test use.
-- **How it was obtained:** one shard (`data_shard_000_zstd.parquet`, ~380MB) downloaded manually
-  from the dataset's Hugging Face page, opened with `pandas`/`pyarrow`, and the first ~5 rows'
-  `audio.bytes` extracted and written out as individual `.wav` files. The parquet shard itself is
-  **not** committed to the repo (too large, and not needed once the samples are extracted) — only
-  the extracted `.wav` files under `data/mock_calls/` are.
-- **What it is NOT:** these are not real FitNova sales calls, not fitness/coaching-domain
-  conversations, and not guaranteed to be dual-channel (verify per-file; mono ones exercise the
-  `pyannote` fallback path from §5). They exist solely to validate the pipeline mechanics
-  (transcribe → diarise → score → tag → store) against real Hindi-English speech.
-- **README requirement:** the "what is real vs mocked" table must state plainly that call audio is
-  sourced from this public dataset, not FitNova, with a link to the dataset page — this is a
-  non-negotiable per `AGENTS.md`.
-
----
-
-## 2b. Containerization & deployment — required, not stretch
-
-Every service runs in Docker from the start, not bolted on at the end. This is now a required
-component, not an optional polish item.
-
-- **`docker-compose.yml`** defines three services: `db` (Postgres, as before), `api` (built from
-  `Dockerfile.api`, runs the FastAPI app), `dashboard` (built from `Dockerfile.dashboard`, runs
-  Streamlit). `docker-compose up --build` brings up the entire system — nobody needs a local Python
-  install to run this.
-- **Dockerfiles are multi-stage:** a `builder` stage installs dependencies into a virtualenv, a slim
-  `runtime` stage (`python:3.11-slim`) copies only that virtualenv + source code. Keeps image size
-  down and avoids shipping build toolchains in the final image.
-- **Ingestion/pipeline scripts are not separate services** — they stay plain function calls
-  triggered through the API (`POST /calls/ingest`, `POST /calls/{id}/process`), consistent with the
-  §1 decision not to introduce a queue/worker layer. Containerizing them as their own service would
-  contradict that decision.
-- **Local dev workflow:** `docker-compose up --build` replaces the old "pip install, then run"
-  flow. `scripts/run_demo.sh` becomes a thin wrapper that calls `docker-compose up --build` and then
-  hits the ingest/process endpoints.
-- **Deployment target: Render.** A `render.yaml` Blueprint defines the same three services (Managed
-  Postgres, API web service, dashboard web service) so the whole stack deploys from one Blueprint
-  import — no manual dashboard clicking per service.
-- **Secrets:** `GEMINI_API_KEY`, `GROQ_API_KEY`, and DB credentials are set as environment variables
-  in Render's dashboard, never committed. `.env.example` remains the local-only template; it is not
-  read in the deployed environment.
-- **README gets two run paths**, not one: **(1) one command locally** — `docker-compose up --build`
-  — and **(2) a deployed link** — both are explicitly permitted by the assignment ("must run, from
-  one clear command **or** a deployed link"), and having both removes any single point of failure
-  on demo day.
-
----
-
-## 3. API endpoints (FastAPI) — 9 total, no more
-
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/calls/ingest` | Pull new calls from the configured adapter into `calls` table (status=pending) |
-| POST | `/calls/{call_id}/process` | Run the full pipeline for one call — idempotent, safe to retry |
-| GET | `/calls` | List calls, filterable by advisor/team/status |
-| GET | `/calls/{call_id}` | Full detail: transcript + scores + tags |
-| GET | `/orgs/{org_id}/summary` | Org-wide rollup (Sales Director view) |
-| GET | `/teams/{team_id}/summary` | Team rollup (Team Leader view) |
-| GET | `/advisors/{advisor_id}/summary` | Advisor's own calls + trend (Advisor view) |
-| POST | `/tags/{tag_id}/contest` | Advisor contests a flag |
-| POST | `/contests/{contest_id}/resolve` | Team Leader marks upheld/overturned |
-
-Keep this list fixed. Do not add endpoints mid-build without updating this table first.
-
----
-
-## 4. Data model (Postgres tables)
-
-```
-orgs(id, name)
-teams(id, org_id FK, name)
-advisors(id, team_id FK, name)
-calls(id, advisor_id FK, source_system, source_call_id, recording_path,
-      status[pending|processing|done|failed], created_at)
-      -- unique constraint on (source_system, source_call_id) = idempotency
-transcripts(id, call_id FK, full_text, segments_json, diarisation_confidence)
-scores(id, call_id FK, needs_discovery, product_knowledge, objection_handling,
-       compliance, trial_booking, overall)
-tags(id, call_id FK, type, severity, timestamp_sec, quoted_line, reason,
-     contest_status[none|pending|upheld|overturned])
-contests(id, tag_id FK, advisor_note, resolved_by, resolution_note, resolved_at)
-```
-
-New team/advisor = new row. No schema change ever required for growth — this directly satisfies
-the "grows without manual reconfiguration" requirement.
-
----
-
-## 5. Edge cases — explicit handling (don't skip, this is graded)
-
-| Edge case | Handling |
-|---|---|
-| Mono / poor diarisation | Set `diarisation_confidence: low`, still process, flag in dashboard rather than silently guessing speaker turns. |
-| Hindi-English code-switching | Whisper `language=None` (auto-detect per segment) rather than forcing one language. |
-| Non-sales call (wrong number, internal) | First LLM pass classifies `call_type` before scoring; non-sales calls get `status=skipped`, not scored. |
-| PII redaction | Regex pass (phone numbers, emails) over transcript before storage/LLM call for anything beyond what's operationally needed. |
-| Hallucinated/false-positive tags | `verifier.py`: every `quoted_line` must literal-match a substring of the transcript or the tag is dropped, not stored. |
-| Vendor API failure | Wrap external calls (Whisper/LLM) in retry-with-backoff; `calls.status` prevents double-processing (idempotency check before reprocessing). `llm_client.py` specifically: retry Gemini 2x, then fall back to Groq automatically before marking the call `failed`. |
-
-**Note on test data:** don't assume the `data/mock_calls/` samples (see §2a) are stereo — check
-each file first (`ffprobe` or a quick Python channel-count check). Whichever samples turn out mono
-become the concrete test case for the "mono / poor diarisation" row above, instead of having to
-fabricate one.
-
----
-
-## 6. Git workflow
-
-- `main` is always green — nothing merges in that hasn't passed its test.
-- One branch per component, named `feature/<component>` (matches folder names above).
-- Commit style: **Conventional Commits** — `feat(ingestion): add folder adapter`,
-  `test(analysis): add hallucination guard test`, `docs: update README run instructions`.
-- Commit at each working checkpoint within a branch, not just once at the end — small commits make
-  debugging and video narration easier later.
-- Before merging a branch: run its tests locally, update PLAN.md's checklist (§7) for that
-  component, then merge to `main` (a self-reviewed PR if using GitHub, or `git merge --no-ff` locally
-  to keep the history explicit even solo).
-- Tag `main` after each merged milestone (`git tag milestone-3-analysis-engine`) — gives you clean
-  rollback points if a later change breaks something.
-
----
-
-## 7. Hour-by-hour roadmap (30h budget) — checklist
-
-- [ ] **0:00–1:00** — Scaffold repo, `docker-compose.yml` (3 services: db/api/dashboard),
-      `Dockerfile.api`, `Dockerfile.dashboard`, `.dockerignore`, `.env.example`, empty module
-      folders, write `AGENTS.md` and this `PLAN.md`. Confirm `docker-compose up --build` starts
-      (even with near-empty API/dashboard) before moving on — every later component builds and
-      tests against this from now on, not a bare local Python install. Commit directly to `main`
-      (chore, no logic yet).
-- [x] **1:00–4:00** — `feature/ingestion-storage`: adapter interface + folder adapter, Postgres
-      models, `db.py`. Before writing the test, populate `data/mock_calls/` per §2a (extract ~5
-      `.wav` samples from the `snorbyte/indic-audio-dialog-sample` shard) so the folder adapter has
-      something real to read. Test: insert a mock call, read it back. Merge.
-- [x] **4:00–8:00** — `feature/transcription`: Whisper wrapper, dual-channel split. Test: one real
-      recorded sample produces a transcript. Merge.
-- [x] **8:00–14:00** — `feature/analysis-engine`: prompts.py, tagger.py, verifier.py, rubric.py.
-      This is the highest-weight component for evaluation — do not rush it. Test: known transcript
-      with a planted issue produces the expected tag; verifier rejects a fabricated quote. Merge.
-- [x] **14:00–16:00** — `feature/pipeline`: orchestrator tying ingestion→transcription→analysis→
-      storage, idempotency check. Test: `test_pipeline_e2e.py` — one call, full loop, asserted in DB.
-      Merge. **(This is the "minimum expectation" bar — once this merges, you have a submittable
-      project. Everything after this is upside.)**
-- [x] **16:00–19:00** — `feature/api`: FastAPI routers per §3. Test: hit each endpoint against the
-      seeded DB. Merge.
-- [x] **19:00–24:00** — `feature/dashboard`: Streamlit, 3 views (org/team/advisor + call detail).
-      Merge.
-- [x] **24:00–26:00** — `feature/feedback-loop`: contest endpoints + dashboard "contest this flag"
-      button. Merge.
-- [x] **26:00–28:00** — `feature/edge-cases`: implement §5 table, add/adjust tests for each row.
-      Merge.
-- [x] **28:00–29:00** — `feature/deploy`: `render.yaml` Blueprint (db + api + dashboard), push,
-      verify all three services come up on Render with real environment variables set, confirm the
-      public API and dashboard URLs work end to end (not just locally). Merge.
-- [x] **29:00–30:00** — README.md (setup — both `docker-compose up --build` locally and the
-      deployed link, what is real versus mocked), writeup (A/B/C sections from the PDF, in your own
-      words, concise).
-- [x] **30:00–31:00** — Buffer + record 2-minute video (trade-offs, what you didn't build and why,
-      where it would fail). Final check: fresh clone + `docker-compose up --build` works, **and**
-      the deployed Render link works independently, in case the video walkthrough references either.
-
-If you're behind schedule at any checkpoint, cut scope from **19:00 onward first** (dashboard
-polish, feedback loop) — never cut the analysis engine, the e2e pipeline test, or the deployment
-step. Those three are what "working prototype," "depth of understanding," and "a deployed link"
-are graded on.
-
-### Optional stretch — MCP wrapper (only if everything above is done, with time to spare)
-
-Not required by the assignment; not graded by its rubric. Skip entirely unless §7 is fully complete
-and merged. If there's spare time in the last hour: wrap 1–2 read endpoints (`GET /calls/{id}`,
-`POST /tags/{id}/contest`) as MCP tools using `fastapi-mcp` (thin layer over the existing FastAPI
-app — no new logic, just exposure) so an MCP-aware client (e.g. Claude Desktop) could query flagged
-calls directly. If there's no spare time, just note the possibility in `docs/06-api.md` — the
-awareness costs nothing, the implementation isn't worth risking the core loop for.
-
----
-
-## 8. Definition of done, per component
-
-A component is only "done" (mergeable) if: it has a passing test, it has a one-paragraph docstring
-at the top of its main file explaining *why* it's built this way, its `docs/<NN>-<component>.md`
-file exists (template below), and PLAN.md's checklist above is ticked. If any of these four is
-missing, it's not done — don't move to the next component.
-
-### `docs/<component>.md` template (keep each under ~20 lines — this feeds the writeup later)
-
-```
-# <Component name>
-
-**What it does:** one or two sentences.
-
-**Why built this way:** the key decision(s) and the alternative you didn't pick, and why.
-
-**Inputs / outputs:** what goes in, what comes out (shapes, not full schemas — those are in code).
-
-**Edge cases handled here:** bullet list, only the ones relevant to this component.
-
-**Known gaps / what I'd do with more time:** honest, short.
-```
-
-Stitching all `docs/*.md` files together at hour 28 (§7) becomes ~80% of your final writeup —
-that's the point of writing them as you go instead of reconstructing everything at the end.
+Each version is independently demo-able. If time runs out partway through, whatever was last
+checkpointed is a valid, honestly-labeled stopping point — never leave a version half-migrated.
