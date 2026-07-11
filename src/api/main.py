@@ -7,10 +7,13 @@ and registers all sub-routers (calls, summaries, contests) to expose the core bu
 and feedback capabilities to the frontend dashboard.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from src.storage.db import engine, Base
 from src.storage import models  # Ensure SQLAlchemy models are registered
 from src.api.routers import calls, summaries, contests
+from src.config import settings
 
 # Create all database tables on start (safe/idempotent)
 Base.metadata.create_all(bind=engine)
@@ -46,6 +49,34 @@ app = FastAPI(
     description="Automated analysis, compliance scoring, and ingestion pipeline for FitNova sales calls.",
     version="1.0.0"
 )
+
+# Parse origins from settings (comma separated list)
+origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
+
+# Mount CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Standardized Error Exception Handler
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """
+    Formats HTTPExceptions to follow standard shape: {"error": {"code": status_code, "message": detail}}
+    """
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "code": exc.status_code,
+                "message": exc.detail
+            }
+        }
+    )
 
 # Register routers
 app.include_router(calls.router)

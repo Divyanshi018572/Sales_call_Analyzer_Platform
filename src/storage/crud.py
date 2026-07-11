@@ -164,9 +164,16 @@ def create_tag(db: Session, call_id: int, tag_type: str, severity: str, timestam
     db.refresh(tag)
     return tag
 
-def get_calls_filtered(db: Session, advisor_id: Optional[int] = None, team_id: Optional[int] = None, status: Optional[str] = None) -> List[Call]:
+def get_calls_filtered(
+    db: Session, 
+    advisor_id: Optional[int] = None, 
+    team_id: Optional[int] = None, 
+    status: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0
+) -> List[Call]:
     """
-    Queries calls filterable by advisor, team, or status.
+    Queries calls filterable by advisor, team, or status with pagination.
     """
     query = db.query(Call)
     if advisor_id:
@@ -178,4 +185,10 @@ def get_calls_filtered(db: Session, advisor_id: Optional[int] = None, team_id: O
     if status:
         query = query.filter(Call.status == status)
         
-    return query.order_by(Call.created_at.desc()).all()
+    query = query.order_by(Call.created_at.desc())
+    if offset:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
+        
+    return query.all()
