@@ -62,16 +62,20 @@ def list_calls(
     advisor_id: Optional[int] = None,
     team_id: Optional[int] = None,
     status: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
     db_session: Session = Depends(db.get_db)
 ):
     """
-    Retrieves call records filterable by advisor ID, team ID, or processing status.
+    Retrieves call records filterable by advisor ID, team ID, or processing status, with pagination.
     """
     return crud.get_calls_filtered(
         db=db_session, 
         advisor_id=advisor_id, 
         team_id=team_id, 
-        status=status
+        status=status,
+        limit=limit,
+        offset=offset
     )
 
 @router.get("/{call_id}", response_model=schemas.CallDetailResponse)

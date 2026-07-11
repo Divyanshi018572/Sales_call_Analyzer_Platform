@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     MOCK_CALLS_DIR: str = "data/mock_calls"
     WHISPER_MODEL_NAME: str = "tiny"
+    
+    # CORS Configuration
+    ALLOWED_ORIGINS: str = "http://localhost:5173"
 
 # Create a singleton settings object
 settings = Settings()
